@@ -41,10 +41,6 @@ No more manually editing `~/.zshrc` — add, edit, delete, and organize your she
 </p>
 
 <p align="center">
-  <img src="docs/ss2.png" width="720" alt="Edit Alias — Form with live preview">
-</p>
-
-<p align="center">
   <img src="docs/ss3.png" width="400" alt="App Icon & Branding">
 </p>
 
