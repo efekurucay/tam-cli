@@ -1,0 +1,47 @@
+{
+  "$schema": "https://wvw.dev/apps.schema.json",
+  "store": {
+    "name": "efekurucay apps",
+    "developer": "efekurucay",
+    "tagline": "Native tools for developers.",
+    "github": "https://github.com/efekurucay"
+  },
+  "categories": [
+    { "id": "macos", "name": "macOS Apps" },
+    { "id": "developer-tools", "name": "Developer Tools" },
+    { "id": "utilities", "name": "Utilities" }
+  ],
+  "apps": [
+    {
+      "id": "terminal-alias-manager",
+      "name": "Terminal Alias Manager",
+      "subtitle": "Manage your shell aliases visually",
+      "description": "A native macOS app to manage your ~/.zshrc terminal aliases with a clean SwiftUI interface.",
+      "longDescription": "Terminal Alias Manager lets you visually manage your shell aliases without ever editing ~/.zshrc by hand. Add, edit, delete, enable/disable, search, sort, duplicate, backup, and import/export aliases — all from a native Finder-style interface. Changes are applied instantly with automatic source ~/.zshrc.",
+      "icon": null,
+      "iconEmoji": "⌨️",
+      "category": ["macos", "developer-tools", "utilities"],
+      "platform": "macOS",
+      "price": "Free",
+      "github": "https://github.com/efekurucay/terminal-alias-manager",
+      "homepage": null,
+      "language": "Swift",
+      "downloadUrl": "https://github.com/efekurucay/terminal-alias-manager/releases/latest",
+      "requirements": "macOS 14.0 (Sonoma) or later",
+      "features": [
+        "Parse & list aliases from ~/.zshrc automatically",
+        "Add, edit, and delete aliases with validation",
+        "Enable/disable aliases without removing them",
+        "Search by name, command, or description",
+        "Sort by name, command, or status",
+        "Duplicate aliases with one click",
+        "Auto-runs source ~/.zshrc after every change",
+        "Backup ~/.zshrc with timestamped copies",
+        "JSON import/export for migration",
+        "Copy any command to clipboard instantly",
+        "Native SwiftUI with Finder-style NavigationSplitView"
+      ],
+      "screenshots": []
+    }
+  ]
+}
