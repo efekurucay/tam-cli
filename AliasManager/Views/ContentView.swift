@@ -86,17 +86,24 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            List(viewModel.filteredAliases, selection: $viewModel.selectedAlias) { alias in
-                AliasRowView(
-                    alias: alias,
-                    onToggle: { viewModel.toggleAlias(alias) },
-                    onDelete: {
-                        aliasToDelete = alias
-                        showDeleteConfirm = true
-                    },
-                    onDuplicate: { viewModel.duplicateAlias(alias) }
-                )
-                .tag(alias)
+            List(selection: $viewModel.selectedAlias) {
+                ForEach(viewModel.filteredAliases) { alias in
+                    AliasRowView(
+                        alias: alias,
+                        isDraggable: viewModel.sortOrder == .manual && viewModel.searchText.isEmpty,
+                        onToggle: { viewModel.toggleAlias(alias) },
+                        onDelete: {
+                            aliasToDelete = alias
+                            showDeleteConfirm = true
+                        },
+                        onDuplicate: { viewModel.duplicateAlias(alias) }
+                    )
+                    .tag(alias)
+                }
+                // Disable reordering while a search filter is active
+                .onMove { from, to in
+                    viewModel.moveAliases(fromOffsets: from, toOffset: to)
+                }
             }
             .listStyle(.sidebar)
             .safeAreaInset(edge: .bottom) {
@@ -163,7 +170,7 @@ struct ContentView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             // Sort menu
             Menu {
-                ForEach(AliasViewModel.SortOrder.allCases, id: \.self) { order in
+                ForEach(AliasViewModel.SortOrder.allCases.filter { $0 != .manual }, id: \.self) { order in
                     Button {
                         viewModel.sortOrder = order
                     } label: {
@@ -175,10 +182,23 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                Divider()
+
+                Button {
+                    viewModel.sortOrder = .manual
+                } label: {
+                    HStack {
+                        Text("Manual Order")
+                        if viewModel.sortOrder == .manual {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
+                Image(systemName: viewModel.sortOrder == .manual ? "hand.draw" : "arrow.up.arrow.down")
             }
-            .help("Sort")
+            .help(viewModel.sortOrder == .manual ? "Manual Order — drag rows to reorder" : "Sort")
 
             // Refresh
             Button {

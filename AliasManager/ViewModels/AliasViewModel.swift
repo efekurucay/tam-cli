@@ -24,6 +24,7 @@ final class AliasViewModel: ObservableObject {
         case name = "Name"
         case command = "Command"
         case status = "Status"
+        case manual = "Manual"
     }
 
     // MARK: - Private
@@ -54,6 +55,8 @@ final class AliasViewModel: ObservableObject {
             result.sort { $0.command.lowercased() < $1.command.lowercased() }
         case .status:
             result.sort { ($0.isEnabled ? 0 : 1) < ($1.isEnabled ? 0 : 1) }
+        case .manual:
+            break // preserve insertion order in aliases array
         }
 
         return result
@@ -204,6 +207,48 @@ final class AliasViewModel: ObservableObject {
         aliases.append(duplicate)
         saveAliases()
         selectedAlias = duplicate
+    }
+
+    /// Moves aliases for drag & drop reordering.
+    /// Works correctly regardless of the current sort mode or active search filter.
+    func moveAliases(fromOffsets: IndexSet, toOffset: Int) {
+        // Capture the current displayed list before we mutate anything
+        let filtered = filteredAliases
+
+        // Items being moved (in their original order)
+        let movingItems = fromOffsets.sorted().map { filtered[$0] }
+
+        // Remaining items in the filtered display order (not being moved)
+        let remainingFiltered = filtered.indices
+            .filter { !fromOffsets.contains($0) }
+            .map { filtered[$0] }
+
+        // Where to insert in the remaining list
+        // toOffset counts positions in the original filtered array, so we
+        // subtract how many "from" indices are before it.
+        let destInRemaining = toOffset - fromOffsets.filter { $0 < toOffset }.count
+
+        // Rebuild the full aliases array:
+        // 1. Remove moved items
+        let movingIDs = Set(movingItems.map(\.id))
+        var newAliases = aliases.filter { !movingIDs.contains($0.id) }
+
+        // 2. Find the insertion point using the anchor item
+        let insertionIndex: Int
+        if destInRemaining < remainingFiltered.count {
+            let anchor = remainingFiltered[destInRemaining]
+            insertionIndex = newAliases.firstIndex(where: { $0.id == anchor.id }) ?? newAliases.count
+        } else {
+            insertionIndex = newAliases.count
+        }
+
+        // 3. Insert moved items at the right position
+        newAliases.insert(contentsOf: movingItems, at: insertionIndex)
+
+        // Switch to manual order so the custom order is preserved
+        sortOrder = .manual
+        aliases = newAliases
+        saveAliases()
     }
 
     // MARK: - Backup
