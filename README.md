@@ -4,7 +4,7 @@
 
 **A native macOS app to visually manage your terminal aliases.**
 
-No more manually editing `~/.zshrc` — add, edit, delete, and organize your shell aliases from a clean, native interface.
+No more manually editing `~/.zshrc` — add, edit, delete, tag and organize your shell aliases from a clean, native interface.
 
 [![Swift](https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%2014+-000000?logo=apple&logoColor=white)](https://developer.apple.com/macos/)
@@ -17,20 +17,33 @@ No more manually editing `~/.zshrc` — add, edit, delete, and organize your she
 
 ## ✨ Features
 
+### Core
 | Feature | Description |
 |---------|-------------|
 | **Parse & List** | Automatically reads and parses aliases from `~/.zshrc` |
 | **Add / Edit / Delete** | Full CRUD with validation and duplicate detection |
 | **Enable / Disable** | Toggle aliases on or off without deleting them |
-| **Search** | Instantly filter by alias name, command, or description |
-| **Sort** | Sort by name, command, or status |
+| **Search** | Instantly filter by alias name, command, description, or tags |
+| **Sort** | Sort by name, command, status, most used, or recently used |
 | **Duplicate** | Clone an existing alias with one click |
 | **Auto Source** | Runs `source ~/.zshrc` after every change |
 | **Backup** | Create timestamped backups of your `.zshrc` |
 | **JSON Import / Export** | Share or migrate aliases between machines |
-| **Copy to Clipboard** | Copy any command with a single click |
-| **Context Menus** | Right-click actions on every alias |
 | **Native UI** | Built with SwiftUI + NavigationSplitView (Finder-style layout) |
+
+### 🆕 New Features
+| Feature | Description |
+|---------|-------------|
+| **Categories / Tags** | Tag aliases with `git`, `docker`, `ssh`... Sidebar tag filtering & chips in rows |
+| **Menu Bar Widget** | Quick access from the menu bar — top aliases, copy commands, ⌘K |
+| **Undo / Redo** | Full undo/redo stack for all changes — `⌘Z` / `⌘⇧Z` |
+| **Usage Statistics** | Track how many times each alias was used, most used / never used views |
+| **Alias Test Runner** | Run any alias command inline and see live output in the detail panel |
+| **Quick Search ⌘K** | Spotlight-style floating search — find and copy any alias in 2 keystrokes |
+| **Syntax Highlighting** | Command field highlights pipes `\|`, flags, `$ENV_VARS`, strings |
+| **Theme Customization** | 10 accent colors, compact/normal/spacious density modes (`⌘,`) |
+| **Alias Pack Templates** | One-click import of 5 curated packs: Git, Docker, Kubernetes, Node/npm, System |
+| **Homebrew Cask** | `brew install --cask efekurucay/tap/alias-manager` |
 
 ---
 
@@ -56,58 +69,21 @@ No more manually editing `~/.zshrc` — add, edit, delete, and organize your she
 
 ## 🚀 Getting Started
 
-### 1. Clone the repository
+### Option A — Build from source
 
 ```bash
 git clone https://github.com/efekurucay/terminal-alias-manager.git
 cd terminal-alias-manager
+open AliasManager.xcodeproj
+# Press ⌘R to build & run
 ```
 
-### 2. Open in Xcode
+### Option B — Homebrew (once the tap is published)
 
 ```bash
-open AliasManager.xcodeproj
+brew tap efekurucay/tap
+brew install --cask alias-manager
 ```
-
-### 3. Build & Run
-
-Press **⌘R** in Xcode or run from the menu: **Product → Run**
-
-The app will launch and automatically read your existing aliases from `~/.zshrc`.
-
----
-
-## 🏗️ Architecture
-
-The project follows the **MVVM** (Model-View-ViewModel) pattern:
-
-```
-AliasManager/
-├── AliasManagerApp.swift           ← App entry point & window config
-├── AliasManager.entitlements       ← File access permissions
-├── Assets.xcassets/                ← App icon & accent color
-│
-├── Models/
-│   └── AliasItem.swift             ← Alias data model
-│
-├── Services/
-│   └── ZshrcService.swift          ← Read/write/parse ~/.zshrc
-│
-├── ViewModels/
-│   └── AliasViewModel.swift        ← Business logic, search, CRUD
-│
-└── Views/
-    ├── ContentView.swift           ← Main screen (NavigationSplitView)
-    ├── AliasRowView.swift          ← Sidebar list row
-    ├── AliasDetailView.swift       ← Detail panel (right side)
-    └── AliasFormView.swift         ← Add / Edit form (sheet)
-```
-
-### Key Design Decisions
-
-- **Sandbox disabled** — The app needs direct access to `~/.zshrc` in the user's home directory. App Sandbox is turned off in the entitlements file.
-- **Non-alias lines preserved** — When saving, the service only modifies the managed alias block. All other `.zshrc` content (exports, PATH, plugins, etc.) is left untouched.
-- **Managed block** — Aliases are written under a clearly marked `# Aliases (Managed by AliasManager)` section for easy identification.
 
 ---
 
@@ -116,68 +92,82 @@ AliasManager/
 | Shortcut | Action |
 |----------|--------|
 | `⌘N` | Add new alias |
+| `⌘K` | Quick Search (Spotlight-style) |
+| `⌘Z` | Undo last change |
+| `⌘⇧Z` | Redo |
 | `⌘R` | Refresh alias list |
-| `Esc` | Cancel / dismiss form |
+| `⌘,` | Open Settings (theme, menu bar) |
+| `Esc` | Cancel / close form |
+
+---
+
+## 🏗️ Architecture
+
+```
+AliasManager/
+├── AliasManagerApp.swift           ← App entry point, Settings scene
+│
+├── Models/
+│   ├── AliasItem.swift             ← Alias data model (+tags, usageCount, lastUsed)
+│   ├── MetadataStore.swift         ← Persists tags & stats (~/.config/alias-manager/)
+│   ├── AppSettings.swift           ← Theme & appearance preferences (@AppStorage)
+│   └── AliasPack.swift             ← 5 pre-built alias packs
+│
+├── Services/
+│   ├── ZshrcService.swift          ← Read/write/parse ~/.zshrc
+│   ├── CommandRunner.swift         ← Async zsh subprocess runner
+│   └── MenuBarController.swift     ← NSStatusItem + aliases menu
+│
+├── ViewModels/
+│   └── AliasViewModel.swift        ← Business logic, undo/redo, tag filtering, stats
+│
+└── Views/
+    ├── ContentView.swift           ← Main screen + StatsView
+    ├── AliasRowView.swift          ← Tag chips, usage badge, density-aware
+    ├── AliasDetailView.swift       ← Detail panel + Test Runner + Tags
+    ├── AliasFormView.swift         ← Add/Edit form + SyntaxHighlightedTextField + FlowLayout
+    ├── QuickSearchView.swift       ← ⌘K Spotlight-style overlay
+    ├── AliasPacksView.swift        ← Template pack browser
+    └── SettingsView.swift          ← Accent color picker, density mode
+```
 
 ---
 
 ## 🔧 How It Works
 
-1. **On launch**, the app reads `~/.zshrc` and parses all lines matching the `alias name='command'` pattern
-2. Commented-out aliases (`# alias name='command'`) are detected as **disabled**
-3. Comments directly above an alias line are captured as **descriptions**
-4. When you make changes, the app:
-   - Rewrites only the alias block in `~/.zshrc`
-   - Runs `source ~/.zshrc` to apply changes immediately
-   - All non-alias content in your `.zshrc` stays intact
+1. **On launch** — reads `~/.zshrc`, parses `alias name='command'` lines
+2. **Metadata** — tags and usage stats are stored separately in `~/.config/alias-manager/metadata.json` (zshrc stays clean)
+3. **On save** — rewrites only the managed alias block, runs `source ~/.zshrc`
+4. **Test Runner** — spawns a `zsh -c "source ~/.zshrc; <command>"` subprocess, captures stdout/stderr
 
 ---
 
-## 📦 Import / Export
+## 📦 Alias Packs
 
-**Export** your aliases as a JSON file to back them up or share across machines:
+Import pre-built alias collections with one click from the toolbar (`Alias Packs`):
 
-```json
-[
-  {
-    "id": "...",
-    "name": "gs",
-    "command": "git status",
-    "isEnabled": true,
-    "comment": "Quick git status"
-  }
-]
-```
-
-**Import** a JSON file to merge aliases into your current set. Duplicates (by name) are automatically skipped.
+| Pack | Count | Description |
+|------|-------|-------------|
+| 🌿 **Git** | 17 | status, add, commit, push, branch, stash... |
+| 🐳 **Docker** | 14 | ps, exec, logs, compose up/down... |
+| ⚙️ **Kubernetes** | 12 | kubectl get/describe/logs/exec... |
+| 📦 **Node / npm** | 13 | install, run dev/build/test, yarn... |
+| 🖥️ **System** | 11 | ls, clear, reload, ip, ports... |
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how:
-
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Ideas for Contribution
-
-- [ ] App icon design
-- [ ] Dark/light theme customization
-- [ ] Support for `.bashrc` and `.bash_profile`
-- [ ] Drag & drop reordering
-- [ ] Alias categories / tags
-- [ ] Menu bar quick-access widget
-- [ ] Homebrew formula
+3. Commit your changes
+4. Push and open a Pull Request
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE)
 
 ---
 
