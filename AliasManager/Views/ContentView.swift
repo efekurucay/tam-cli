@@ -1,25 +1,47 @@
 import SwiftUI
 
-/// Main app view — Finder-style NavigationSplitView interface.
+/// Main app view — three-pane NavigationSplitView.
 struct ContentView: View {
-    @StateObject private var viewModel = AliasViewModel()
-    @State private var showDeleteConfirm = false
+    @StateObject private var viewModel     = AliasViewModel()
+    @StateObject private var menuBar       = MenuBarController()
+    @ObservedObject private var settings   = AppSettings.shared
+
+    @State private var showDeleteConfirm  = false
     @State private var aliasToDelete: AliasItem?
+    @State private var showQuickSearch    = false
+    @State private var showPacksSheet     = false
+    @State private var showStatsSheet     = false
 
     var body: some View {
         NavigationSplitView {
-            // Sidebar: Alias list
             sidebarContent
-                .navigationSplitViewColumnWidth(min: 250, ideal: 300)
+                .navigationSplitViewColumnWidth(min: 230, ideal: 280)
         } detail: {
-            // Detail panel
             detailContent
         }
         .navigationTitle("AliasManager")
-        .searchable(text: $viewModel.searchText, prompt: "Search aliases...")
+        .searchable(text: $viewModel.searchText, prompt: "Search aliases…")
         .onAppear {
             viewModel.loadAliases()
+            menuBar.setup(viewModel: viewModel)
         }
+        // Rebuild menu bar when aliases change
+        .onChange(of: viewModel.aliases) { _, _ in
+            menuBar.rebuild()
+        }
+        // Notifications
+        .onReceive(NotificationCenter.default.publisher(for: .showQuickSearch)) { _ in
+            showQuickSearch = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .menuBarNeedsRebuild)) { note in
+            let enabled = note.userInfo?["enabled"] as? Bool ?? true
+            if enabled { menuBar.setup(viewModel: viewModel) }
+            else { menuBar.remove() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshAliases)) { _ in
+            viewModel.loadAliases()
+        }
+        // Alerts
         .alert("Notice", isPresented: $viewModel.showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -28,30 +50,58 @@ struct ContentView: View {
         .alert("Delete Alias", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
-                if let alias = aliasToDelete {
-                    viewModel.deleteAlias(alias)
-                }
+                if let alias = aliasToDelete { viewModel.deleteAlias(alias) }
             }
         } message: {
             if let alias = aliasToDelete {
                 Text("Are you sure you want to delete '\(alias.name)'?")
             }
         }
+        // Sheets
         .sheet(isPresented: $viewModel.isShowingAddForm) {
-            AliasFormView(isEditing: false) { name, command, comment in
-                viewModel.addAlias(name: name, command: command, comment: comment)
+            AliasFormView(isEditing: false) { name, command, comment, tags in
+                viewModel.addAlias(name: name, command: command, comment: comment, tags: tags)
             }
         }
         .sheet(isPresented: $viewModel.isShowingEditForm) {
             if let editing = viewModel.editingAlias {
-                AliasFormView(isEditing: true, existingAlias: editing) { name, command, comment in
-                    viewModel.updateAlias(editing, name: name, command: command, comment: comment)
+                AliasFormView(isEditing: true, existingAlias: editing) { name, command, comment, tags in
+                    viewModel.updateAlias(editing, name: name, command: command, comment: comment, tags: tags)
                 }
             }
         }
-        .toolbar {
-            toolbarContent
+        .sheet(isPresented: $showPacksSheet) {
+            AliasPacksView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showStatsSheet) {
+            StatsView(viewModel: viewModel)
+        }
+        // Quick Search overlay
+        .overlay {
+            if showQuickSearch {
+                quickSearchOverlay
+            }
+        }
+        .toolbar { toolbarContent }
+    }
+
+    // MARK: - Quick Search Overlay
+
+    private var quickSearchOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+                .onTapGesture { showQuickSearch = false }
+
+            QuickSearchView(viewModel: viewModel, isPresented: $showQuickSearch)
+                .frame(maxWidth: 520)
+                .padding(.top, 80)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .ignoresSafeArea()
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.15), value: showQuickSearch)
+        .zIndex(100)
     }
 
     // MARK: - Sidebar
@@ -59,39 +109,36 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarContent: some View {
         if viewModel.isLoading {
-            ProgressView("Loading...")
+            ProgressView("Loading…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if viewModel.filteredAliases.isEmpty {
-            VStack(spacing: 16) {
-                Image(systemName: viewModel.searchText.isEmpty ? "terminal" : "magnifyingglass")
-                    .font(.system(size: 40))
-                    .foregroundColor(.secondary)
-
-                if viewModel.searchText.isEmpty {
-                    Text("No aliases yet")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("Click the + button\nto add a new alias.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                } else {
-                    Text("No results found")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("No aliases matching '\(viewModel.searchText)'.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             List(selection: $viewModel.selectedAlias) {
+                // All Aliases section
+                allAliasesSection
+
+                // Tag sections
+                if !viewModel.availableTags.isEmpty {
+                    tagSections
+                }
+            }
+            .listStyle(.sidebar)
+            .safeAreaInset(edge: .bottom) { statusBar }
+        }
+    }
+
+    @ViewBuilder
+    private var allAliasesSection: some View {
+        let isAllSelected = viewModel.selectedTag == nil
+
+        Section {
+            if viewModel.filteredAliases.isEmpty {
+                emptyState
+            } else {
                 ForEach(viewModel.filteredAliases) { alias in
                     AliasRowView(
                         alias: alias,
                         isDraggable: viewModel.sortOrder == .manual && viewModel.searchText.isEmpty,
-                        onToggle: { viewModel.toggleAlias(alias) },
+                        onToggle:    { viewModel.toggleAlias(alias) },
                         onDelete: {
                             aliasToDelete = alias
                             showDeleteConfirm = true
@@ -100,16 +147,86 @@ struct ContentView: View {
                     )
                     .tag(alias)
                 }
-                // Disable reordering while a search filter is active
-                .onMove { from, to in
-                    viewModel.moveAliases(fromOffsets: from, toOffset: to)
+                .onMove { from, to in viewModel.moveAliases(fromOffsets: from, toOffset: to) }
+            }
+        } header: {
+            Button {
+                viewModel.selectedTag = nil
+            } label: {
+                HStack {
+                    Label("All Aliases", systemImage: "terminal")
+                        .foregroundColor(isAllSelected ? .accentColor : .primary)
+                    Spacer()
+                    Text("\(viewModel.aliases.count)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
-            .listStyle(.sidebar)
-            .safeAreaInset(edge: .bottom) {
-                statusBar
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var tagSections: some View {
+        Section {
+            ForEach(viewModel.availableTags, id: \.self) { tag in
+                let count = viewModel.aliases.filter { $0.tags.contains(tag) }.count
+                let isSelected = viewModel.selectedTag == tag
+
+                Button {
+                    viewModel.selectedTag = isSelected ? nil : tag
+                } label: {
+                    HStack {
+                        Image(systemName: "tag.fill")
+                            .foregroundColor(isSelected ? .accentColor : .secondary)
+                            .font(.caption)
+                        Text(tag)
+                            .foregroundColor(isSelected ? .accentColor : .primary)
+                        Spacer()
+                        Text("\(count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 1)
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
+            }
+        } header: {
+            Text("By Tag")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: viewModel.searchText.isEmpty ? "terminal" : "magnifyingglass")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+
+            if viewModel.searchText.isEmpty {
+                if let tag = viewModel.selectedTag {
+                    Text("No aliases tagged \"\(tag)\"")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("No aliases yet")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Text("Click + to add your first alias.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Text("No results for \"\(viewModel.searchText)\"")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
     }
 
     // MARK: - Detail
@@ -123,12 +240,13 @@ struct ContentView: View {
                     viewModel.editingAlias = selected
                     viewModel.isShowingEditForm = true
                 },
-                onToggle: { viewModel.toggleAlias(selected) },
+                onToggle:       { viewModel.toggleAlias(selected) },
                 onDelete: {
                     aliasToDelete = selected
                     showDeleteConfirm = true
                 },
-                onDuplicate: { viewModel.duplicateAlias(selected) }
+                onDuplicate:    { viewModel.duplicateAlias(selected) },
+                onRecordUsage:  { viewModel.recordUsage(for: selected) }
             )
         } else {
             VStack(spacing: 16) {
@@ -145,15 +263,19 @@ struct ContentView: View {
     // MARK: - Status Bar
 
     private var statusBar: some View {
-        HStack {
+        HStack(spacing: 8) {
+            if let tag = viewModel.selectedTag {
+                Label(tag, systemImage: "tag.fill")
+                    .font(.caption)
+                    .foregroundColor(.accentColor)
+                Text("·").foregroundColor(.secondary)
+            }
             Text("\(viewModel.activeCount) active")
                 .foregroundColor(.green)
-            Text("·")
-                .foregroundColor(.secondary)
+            Text("·").foregroundColor(.secondary)
             Text("\(viewModel.disabledCount) disabled")
                 .foregroundColor(.secondary)
-            Text("·")
-                .foregroundColor(.secondary)
+            Text("·").foregroundColor(.secondary)
             Text("\(viewModel.aliases.count) total")
                 .foregroundColor(.secondary)
         }
@@ -168,6 +290,28 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            // Undo
+            Button {
+                viewModel.undo()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .disabled(!viewModel.canUndo)
+            .help(viewModel.canUndo ? "Undo: \(viewModel.lastUndoAction)" : "Nothing to undo")
+            .keyboardShortcut("z", modifiers: .command)
+
+            // Redo
+            Button {
+                viewModel.redo()
+            } label: {
+                Image(systemName: "arrow.uturn.forward")
+            }
+            .disabled(!viewModel.canRedo)
+            .help("Redo")
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+
+            Divider()
+
             // Sort menu
             Menu {
                 ForEach(AliasViewModel.SortOrder.allCases.filter { $0 != .manual }, id: \.self) { order in
@@ -176,54 +320,68 @@ struct ContentView: View {
                     } label: {
                         HStack {
                             Text(order.rawValue)
-                            if viewModel.sortOrder == order {
-                                Image(systemName: "checkmark")
-                            }
+                            if viewModel.sortOrder == order { Image(systemName: "checkmark") }
                         }
                     }
                 }
-
                 Divider()
-
                 Button {
                     viewModel.sortOrder = .manual
                 } label: {
                     HStack {
                         Text("Manual Order")
-                        if viewModel.sortOrder == .manual {
-                            Image(systemName: "checkmark")
-                        }
+                        if viewModel.sortOrder == .manual { Image(systemName: "checkmark") }
                     }
                 }
             } label: {
                 Image(systemName: viewModel.sortOrder == .manual ? "hand.draw" : "arrow.up.arrow.down")
             }
-            .help(viewModel.sortOrder == .manual ? "Manual Order — drag rows to reorder" : "Sort")
+            .help("Sort")
 
             // Refresh
-            Button {
-                viewModel.loadAliases()
-            } label: {
+            Button { viewModel.loadAliases() } label: {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Refresh")
             .keyboardShortcut("r", modifiers: .command)
 
-            // Add new alias
-            Button {
-                viewModel.isShowingAddForm = true
-            } label: {
+            // Add
+            Button { viewModel.isShowingAddForm = true } label: {
                 Image(systemName: "plus")
             }
-            .help("Add New Alias")
+            .help("Add New Alias (⌘N)")
             .keyboardShortcut("n", modifiers: .command)
         }
 
         ToolbarItemGroup(placement: .secondaryAction) {
+            // Quick Search
+            Button {
+                showQuickSearch = true
+            } label: {
+                Label("Quick Search", systemImage: "magnifyingglass")
+            }
+            .keyboardShortcut("k", modifiers: .command)
+
+            // Alias Packs
+            Button {
+                showPacksSheet = true
+            } label: {
+                Label("Alias Packs", systemImage: "tray.and.arrow.down")
+            }
+
+            // Stats
+            Button {
+                showStatsSheet = true
+            } label: {
+                Label("Statistics", systemImage: "chart.bar")
+            }
+
+            Divider()
+
             // Backup
             Button {
                 if let path = viewModel.createBackup() {
-                    viewModel.alertMessage = "Backup created: \(path)"
+                    viewModel.alertMessage = "Backup created:\n\(path)"
                     viewModel.showAlert = true
                 }
             } label: {
@@ -260,6 +418,184 @@ struct ContentView: View {
                 Label("Import JSON", systemImage: "square.and.arrow.down")
             }
         }
+    }
+}
+
+// MARK: - Stats View (inline here for simplicity)
+
+struct StatsView: View {
+    @ObservedObject var viewModel: AliasViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Usage Statistics")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(24)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Summary cards
+                    summaryCards
+
+                    // Top used
+                    topUsedSection
+
+                    // Never used
+                    unusedSection
+                }
+                .padding(24)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 520, height: 560)
+    }
+
+    private var summaryCards: some View {
+        HStack(spacing: 12) {
+            statCard("\(viewModel.aliases.count)", "Total Aliases",    "terminal",        .accentColor)
+            statCard("\(viewModel.activeCount)",   "Active",          "circle.fill",     .green)
+            statCard("\(viewModel.topAliases(limit: 100).count)", "Used",  "chart.bar.fill", .blue)
+            statCard("\(viewModel.unusedAliases.count)", "Unused",    "zzz",             .secondary)
+        }
+    }
+
+    private func statCard(_ value: String, _ label: String, _ icon: String, _ color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(color)
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(color)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private var topUsedSection: some View {
+        let top = viewModel.topAliases(limit: 10)
+        if !top.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Most Used")
+                    .font(.headline)
+
+                ForEach(Array(top.enumerated()), id: \.element.id) { rank, alias in
+                    HStack(spacing: 12) {
+                        Text("\(rank + 1)")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.secondary)
+                            .frame(width: 20, alignment: .trailing)
+
+                        Text(alias.name)
+                            .font(.system(.body, design: .monospaced, weight: .semibold))
+                            .frame(width: 120, alignment: .leading)
+
+                        // Usage bar
+                        let maxCount = top.first?.usageCount ?? 1
+                        GeometryReader { geo in
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.accentColor.opacity(0.2))
+                                .overlay(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.accentColor)
+                                        .frame(width: geo.size.width * CGFloat(alias.usageCount) / CGFloat(maxCount))
+                                }
+                        }
+                        .frame(height: 6)
+
+                        Text("\(alias.usageCount)×")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.accentColor)
+                            .frame(width: 40, alignment: .trailing)
+
+                        if let last = alias.lastUsed {
+                            Text(last.relativeString)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .frame(width: 80, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var unusedSection: some View {
+        let unused = viewModel.unusedAliases
+        if !unused.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Never Used (\(unused.count))")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+
+                Text("These aliases have never been copied or run from AliasManager.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                ForEach(unused.prefix(15)) { alias in
+                    HStack {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.3))
+                            .frame(width: 6, height: 6)
+                        Text(alias.name)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text(alias.command)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .lineLimit(1)
+                    }
+                }
+
+                if unused.count > 15 {
+                    Text("… and \(unused.count - 15) more")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private extension Date {
+    var relativeString: String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f.localizedString(for: self, relativeTo: Date())
     }
 }
 

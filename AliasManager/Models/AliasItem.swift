@@ -3,27 +3,53 @@ import Foundation
 /// Represents a single terminal alias.
 /// Example: alias gs='git status'
 struct AliasItem: Identifiable, Hashable, Codable {
+
     let id: UUID
-    var name: String       // Alias name, e.g. "gs"
-    var command: String    // Alias command, e.g. "git status"
-    var isEnabled: Bool    // Whether the alias is active
-    var comment: String    // Optional description
+    var name: String       // e.g. "gs"
+    var command: String    // e.g. "git status"
+    var isEnabled: Bool    // whether the alias is active
+    var comment: String    // optional description
+
+    // MARK: - Metadata (persisted via MetadataStore, not in .zshrc)
+    var tags: [String]     // e.g. ["git", "workflow"]
+    var usageCount: Int    // number of times used from the app
+    var lastUsed: Date?    // last used date
+
+    // MARK: - Init
 
     init(
         id: UUID = UUID(),
         name: String,
         command: String,
         isEnabled: Bool = true,
-        comment: String = ""
+        comment: String = "",
+        tags: [String] = [],
+        usageCount: Int = 0,
+        lastUsed: Date? = nil
     ) {
-        self.id = id
-        self.name = name
-        self.command = command
-        self.isEnabled = isEnabled
-        self.comment = comment
+        self.id         = id
+        self.name       = name
+        self.command    = command
+        self.isEnabled  = isEnabled
+        self.comment    = comment
+        self.tags       = tags
+        self.usageCount = usageCount
+        self.lastUsed   = lastUsed
     }
 
-    /// Returns the full line to be written to .zshrc.
+    // MARK: - Hashable (identity by id)
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: AliasItem, rhs: AliasItem) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    // MARK: - .zshrc serialization
+
+    /// Returns the line(s) to be written to .zshrc.
     var zshrcLine: String {
         var lines: [String] = []
         if !comment.isEmpty {
@@ -38,7 +64,7 @@ struct AliasItem: Identifiable, Hashable, Codable {
         return lines.joined(separator: "\n")
     }
 
-    /// Short preview of the alias line
+    /// One-line alias preview string.
     var preview: String {
         "alias \(name)='\(command)'"
     }

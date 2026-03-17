@@ -1,11 +1,11 @@
 import Foundation
 import SwiftUI
 
-/// ViewModel managing the alias list business logic.
+/// ViewModel managing the alias list, undo/redo, tag filtering, and usage stats.
 @MainActor
 final class AliasViewModel: ObservableObject {
 
-    // MARK: - Published Properties
+    // MARK: - Published State
 
     @Published var aliases: [AliasItem] = []
     @Published var searchText: String = ""
@@ -17,25 +17,60 @@ final class AliasViewModel: ObservableObject {
     @Published var showAlert: Bool = false
     @Published var sortOrder: SortOrder = .name
     @Published var isLoading: Bool = false
+    @Published var selectedTag: String? = nil   // nil = all aliases
+
+    // MARK: - Undo / Redo
+
+    private struct HistoryEntry {
+        let action: String
+        let aliases: [AliasItem]
+    }
+
+    private var undoStack: [HistoryEntry] = []
+    private var redoStack: [HistoryEntry] = []
+
+    @Published var canUndo: Bool = false
+    @Published var canRedo: Bool = false
+    @Published var lastUndoAction: String = ""
 
     // MARK: - Enums
 
     enum SortOrder: String, CaseIterable {
-        case name = "Name"
+        case name    = "Name"
         case command = "Command"
-        case status = "Status"
-        case manual = "Manual"
+        case status  = "Status"
+        case usage   = "Most Used"
+        case recent  = "Recently Used"
+        case manual  = "Manual"
     }
 
-    // MARK: - Private
+    // MARK: - Dependencies
 
     private let service: ZshrcService
+    private let metadata = MetadataStore.shared
 
-    // MARK: - Computed
+    // MARK: - Init
 
-    /// Filtered and sorted alias list
+    init(service: ZshrcService = ZshrcService()) {
+        self.service = service
+    }
+
+    // MARK: - Computed: Filtering + Sorting
+
+    /// Tags derived from current alias list (for sidebar).
+    var availableTags: [String] {
+        let tags = aliases.flatMap { $0.tags }
+        return Array(Set(tags)).sorted()
+    }
+
+    /// Aliases filtered by active tag and search text, then sorted.
     var filteredAliases: [AliasItem] {
         var result = aliases
+
+        // Tag filter
+        if let tag = selectedTag {
+            result = result.filter { $0.tags.contains(tag) }
+        }
 
         // Search filter
         if !searchText.isEmpty {
@@ -43,7 +78,8 @@ final class AliasViewModel: ObservableObject {
             result = result.filter { alias in
                 alias.name.lowercased().contains(query) ||
                 alias.command.lowercased().contains(query) ||
-                alias.comment.lowercased().contains(query)
+                alias.comment.lowercased().contains(query) ||
+                alias.tags.joined(separator: " ").lowercased().contains(query)
             }
         }
 
@@ -55,44 +91,52 @@ final class AliasViewModel: ObservableObject {
             result.sort { $0.command.lowercased() < $1.command.lowercased() }
         case .status:
             result.sort { ($0.isEnabled ? 0 : 1) < ($1.isEnabled ? 0 : 1) }
+        case .usage:
+            result.sort { $0.usageCount > $1.usageCount }
+        case .recent:
+            result.sort {
+                ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast)
+            }
         case .manual:
-            break // preserve insertion order in aliases array
+            break
         }
 
         return result
     }
 
-    /// Number of active aliases
-    var activeCount: Int {
-        aliases.filter(\.isEnabled).count
+    var activeCount: Int   { aliases.filter(\.isEnabled).count }
+    var disabledCount: Int { aliases.filter { !$0.isEnabled }.count }
+
+    /// Top-used aliases for Menu Bar and Stats (up to N).
+    func topAliases(limit: Int = 10) -> [AliasItem] {
+        aliases
+            .filter { $0.usageCount > 0 }
+            .sorted { $0.usageCount > $1.usageCount }
+            .prefix(limit)
+            .map { $0 }
     }
 
-    /// Number of disabled aliases
-    var disabledCount: Int {
-        aliases.filter { !$0.isEnabled }.count
+    /// Aliases never used from the app.
+    var unusedAliases: [AliasItem] {
+        aliases.filter { $0.usageCount == 0 }
     }
 
-    // MARK: - Init
+    // MARK: - Load / Save
 
-    init(service: ZshrcService = ZshrcService()) {
-        self.service = service
-    }
-
-    // MARK: - CRUD Operations
-
-    /// Loads aliases from .zshrc.
     func loadAliases() {
         isLoading = true
         do {
-            aliases = try service.loadAliases()
+            var loaded = try service.loadAliases()
+            metadata.merge(into: &loaded)
+            aliases = loaded
         } catch {
             showError("Failed to load aliases: \(error.localizedDescription)")
         }
         isLoading = false
     }
 
-    /// Saves aliases to .zshrc.
     func saveAliases() {
+        metadata.syncTags(from: aliases)
         do {
             try service.saveAliases(aliases)
             service.sourceZshrc()
@@ -101,139 +145,170 @@ final class AliasViewModel: ObservableObject {
         }
     }
 
-    /// Adds a new alias.
-    func addAlias(name: String, command: String, comment: String = "") {
-        guard !name.isEmpty else {
-            showError("Alias name cannot be empty.")
-            return
-        }
+    // MARK: - Undo / Redo Support
 
-        guard !command.isEmpty else {
-            showError("Command cannot be empty.")
-            return
-        }
+    private func pushUndo(action: String) {
+        undoStack.append(HistoryEntry(action: action, aliases: aliases))
+        redoStack.removeAll()
+        refreshUndoState()
+    }
 
-        // Check for duplicate name
+    private func refreshUndoState() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+        lastUndoAction = undoStack.last?.action ?? ""
+    }
+
+    func undo() {
+        guard let entry = undoStack.popLast() else { return }
+        redoStack.append(HistoryEntry(action: entry.action, aliases: aliases))
+        aliases = entry.aliases
+        saveAliases()
+        refreshUndoState()
+        // Fix selection if needed
+        if let sel = selectedAlias, !aliases.contains(where: { $0.id == sel.id }) {
+            selectedAlias = nil
+        }
+    }
+
+    func redo() {
+        guard let entry = redoStack.popLast() else { return }
+        undoStack.append(HistoryEntry(action: entry.action, aliases: aliases))
+        aliases = entry.aliases
+        saveAliases()
+        refreshUndoState()
+    }
+
+    // MARK: - CRUD
+
+    func addAlias(name: String, command: String, comment: String = "", tags: [String] = []) {
+        guard !name.isEmpty else { showError("Alias name cannot be empty."); return }
+        guard !command.isEmpty else { showError("Command cannot be empty."); return }
+
         if aliases.contains(where: { $0.name == name }) {
             showError("An alias named '\(name)' already exists.")
             return
         }
 
-        // Validate alias name characters
         let validNamePattern = #"^[a-zA-Z_][a-zA-Z0-9_-]*$"#
         guard name.range(of: validNamePattern, options: .regularExpression) != nil else {
             showError("Alias name can only contain letters, numbers, underscores, and hyphens.")
             return
         }
 
-        let newAlias = AliasItem(
-            name: name,
-            command: command,
-            isEnabled: true,
-            comment: comment
-        )
-
+        pushUndo(action: "Add '\(name)'")
+        let newAlias = AliasItem(name: name, command: command, isEnabled: true, comment: comment, tags: tags)
         aliases.append(newAlias)
         saveAliases()
         selectedAlias = newAlias
     }
 
-    /// Updates an existing alias.
-    func updateAlias(_ alias: AliasItem, name: String, command: String, comment: String) {
+    func updateAlias(_ alias: AliasItem, name: String, command: String, comment: String, tags: [String] = []) {
         guard let index = aliases.firstIndex(where: { $0.id == alias.id }) else { return }
 
-        // Check if the new name conflicts with another alias
         if name != alias.name && aliases.contains(where: { $0.name == name }) {
             showError("An alias named '\(name)' already exists.")
             return
         }
 
-        aliases[index].name = name
+        pushUndo(action: "Edit '\(alias.name)'")
+        aliases[index].name    = name
         aliases[index].command = command
         aliases[index].comment = comment
+        aliases[index].tags    = tags
         saveAliases()
 
-        // Update selection
         if selectedAlias?.id == alias.id {
             selectedAlias = aliases[index]
         }
     }
 
-    /// Deletes an alias.
     func deleteAlias(_ alias: AliasItem) {
+        pushUndo(action: "Delete '\(alias.name)'")
         aliases.removeAll { $0.id == alias.id }
-        if selectedAlias?.id == alias.id {
-            selectedAlias = nil
-        }
+        metadata.deleteEntry(for: alias.name)
+        if selectedAlias?.id == alias.id { selectedAlias = nil }
         saveAliases()
     }
 
-    /// Deletes multiple aliases.
     func deleteAliases(_ aliasIDs: Set<UUID>) {
+        let names = aliases.filter { aliasIDs.contains($0.id) }.map(\.name)
+        pushUndo(action: "Delete \(aliasIDs.count) alias(es)")
         aliases.removeAll { aliasIDs.contains($0.id) }
-        if let sel = selectedAlias, aliasIDs.contains(sel.id) {
-            selectedAlias = nil
-        }
+        names.forEach { metadata.deleteEntry(for: $0) }
+        if let sel = selectedAlias, aliasIDs.contains(sel.id) { selectedAlias = nil }
         saveAliases()
     }
 
-    /// Toggles an alias between enabled and disabled.
     func toggleAlias(_ alias: AliasItem) {
         guard let index = aliases.firstIndex(where: { $0.id == alias.id }) else { return }
+        pushUndo(action: "\(aliases[index].isEnabled ? "Disable" : "Enable") '\(alias.name)'")
         aliases[index].isEnabled.toggle()
         saveAliases()
-
-        if selectedAlias?.id == alias.id {
-            selectedAlias = aliases[index]
-        }
+        if selectedAlias?.id == alias.id { selectedAlias = aliases[index] }
     }
 
-    /// Duplicates an alias.
     func duplicateAlias(_ alias: AliasItem) {
         var newName = alias.name + "_copy"
         var counter = 1
         while aliases.contains(where: { $0.name == newName }) {
             counter += 1
-            newName = alias.name + "_copy\(counter)"
+            newName = "\(alias.name)_copy\(counter)"
         }
-
+        pushUndo(action: "Duplicate '\(alias.name)'")
         let duplicate = AliasItem(
-            name: newName,
-            command: alias.command,
-            isEnabled: alias.isEnabled,
-            comment: alias.comment
+            name: newName, command: alias.command,
+            isEnabled: alias.isEnabled, comment: alias.comment,
+            tags: alias.tags
         )
-
         aliases.append(duplicate)
         saveAliases()
         selectedAlias = duplicate
     }
 
-    /// Moves aliases for drag & drop reordering.
-    /// Works correctly regardless of the current sort mode or active search filter.
+    // MARK: - Tag Operations
+
+    func setTags(_ tags: [String], for alias: AliasItem) {
+        guard let index = aliases.firstIndex(where: { $0.id == alias.id }) else { return }
+        aliases[index].tags = tags
+        saveAliases()
+        if selectedAlias?.id == alias.id { selectedAlias = aliases[index] }
+    }
+
+    func addTagToAll(_ tag: String, matching filter: (AliasItem) -> Bool) {
+        pushUndo(action: "Tag all as '\(tag)'")
+        for i in aliases.indices where filter(aliases[i]) {
+            if !aliases[i].tags.contains(tag) {
+                aliases[i].tags.append(tag)
+            }
+        }
+        saveAliases()
+    }
+
+    // MARK: - Usage Stats
+
+    func recordUsage(for alias: AliasItem) {
+        guard let index = aliases.firstIndex(where: { $0.id == alias.id }) else { return }
+        aliases[index].usageCount += 1
+        aliases[index].lastUsed   = Date()
+        metadata.recordUsage(for: alias.name)
+        // No undo for usage recording
+        if selectedAlias?.id == alias.id { selectedAlias = aliases[index] }
+    }
+
+    // MARK: - Reorder
+
     func moveAliases(fromOffsets: IndexSet, toOffset: Int) {
-        // Capture the current displayed list before we mutate anything
-        let filtered = filteredAliases
-
-        // Items being moved (in their original order)
-        let movingItems = fromOffsets.sorted().map { filtered[$0] }
-
-        // Remaining items in the filtered display order (not being moved)
+        let filtered       = filteredAliases
+        let movingItems    = fromOffsets.sorted().map { filtered[$0] }
         let remainingFiltered = filtered.indices
             .filter { !fromOffsets.contains($0) }
             .map { filtered[$0] }
 
-        // Where to insert in the remaining list
-        // toOffset counts positions in the original filtered array, so we
-        // subtract how many "from" indices are before it.
         let destInRemaining = toOffset - fromOffsets.filter { $0 < toOffset }.count
+        let movingIDs       = Set(movingItems.map(\.id))
+        var newAliases      = aliases.filter { !movingIDs.contains($0.id) }
 
-        // Rebuild the full aliases array:
-        // 1. Remove moved items
-        let movingIDs = Set(movingItems.map(\.id))
-        var newAliases = aliases.filter { !movingIDs.contains($0.id) }
-
-        // 2. Find the insertion point using the anchor item
         let insertionIndex: Int
         if destInRemaining < remainingFiltered.count {
             let anchor = remainingFiltered[destInRemaining]
@@ -242,29 +317,23 @@ final class AliasViewModel: ObservableObject {
             insertionIndex = newAliases.count
         }
 
-        // 3. Insert moved items at the right position
         newAliases.insert(contentsOf: movingItems, at: insertionIndex)
-
-        // Switch to manual order so the custom order is preserved
         sortOrder = .manual
-        aliases = newAliases
+        aliases   = newAliases
         saveAliases()
     }
 
     // MARK: - Backup
 
-    /// Creates a .zshrc backup.
     func createBackup() -> String? {
         do {
-            let path = try service.createBackup()
-            return path
+            return try service.createBackup()
         } catch {
             showError("Failed to create backup: \(error.localizedDescription)")
             return nil
         }
     }
 
-    /// Restores from a backup.
     func restoreFromBackup(_ path: String) {
         do {
             try service.restoreFromBackup(path)
@@ -276,22 +345,22 @@ final class AliasViewModel: ObservableObject {
 
     // MARK: - Export / Import
 
-    /// Exports aliases as JSON.
     func exportToJSON() -> Data? {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting    = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
         return try? encoder.encode(aliases)
     }
 
-    /// Imports aliases from JSON.
     func importFromJSON(_ data: Data) {
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         guard let imported = try? decoder.decode([AliasItem].self, from: data) else {
             showError("Failed to read JSON file.")
             return
         }
 
-        // Skip aliases with conflicting names
+        pushUndo(action: "Import \(imported.count) alias(es)")
         var added = 0
         for alias in imported {
             if !aliases.contains(where: { $0.name == alias.name }) {
@@ -299,23 +368,37 @@ final class AliasViewModel: ObservableObject {
                 added += 1
             }
         }
-
-        if added > 0 {
-            saveAliases()
-        }
-
+        if added > 0 { saveAliases() }
         showInfo("\(added) alias(es) imported. \(imported.count - added) skipped (already exist).")
+    }
+
+    // MARK: - Alias Pack Import
+
+    func importPack(_ pack: AliasPack) -> (added: Int, skipped: Int) {
+        pushUndo(action: "Import '\(pack.name)' pack")
+        var added   = 0
+        var skipped = 0
+        for alias in pack.aliases {
+            if !aliases.contains(where: { $0.name == alias.name }) {
+                aliases.append(alias)
+                added += 1
+            } else {
+                skipped += 1
+            }
+        }
+        if added > 0 { saveAliases() }
+        return (added, skipped)
     }
 
     // MARK: - Helpers
 
-    private func showError(_ message: String) {
+    func showError(_ message: String) {
         alertMessage = message
-        showAlert = true
+        showAlert    = true
     }
 
     private func showInfo(_ message: String) {
         alertMessage = message
-        showAlert = true
+        showAlert    = true
     }
 }

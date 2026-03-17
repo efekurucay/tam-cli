@@ -1,23 +1,26 @@
 import SwiftUI
 
-/// AliasManager — A native macOS app to manage your terminal aliases.
 @main
 struct AliasManagerApp: App {
 
     var body: some Scene {
+        // Main window
         WindowGroup {
             ContentView()
         }
         .windowStyle(.titleBar)
-        .defaultSize(width: 800, height: 550)
+        .defaultSize(width: 880, height: 580)
         .commands {
-            // File menu commands
+            // File menu
             CommandGroup(after: .newItem) {
                 Button("Refresh") {
                     NotificationCenter.default.post(name: .refreshAliases, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: .command)
             }
+
+            // Edit menu — Undo/Redo handled by toolbar buttons
+            CommandGroup(replacing: .undoRedo) { }
 
             // Help menu
             CommandGroup(replacing: .help) {
@@ -26,7 +29,18 @@ struct AliasManagerApp: App {
                         URL(string: "https://github.com/efekurucay/terminal-alias-manager")!
                     )
                 }
+                Divider()
+                Button("View on GitHub") {
+                    NSWorkspace.shared.open(
+                        URL(string: "https://github.com/efekurucay/terminal-alias-manager")!
+                    )
+                }
             }
+        }
+
+        // Settings window (⌘,)
+        Settings {
+            SettingsView()
         }
     }
 }
