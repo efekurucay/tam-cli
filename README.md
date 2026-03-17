@@ -72,7 +72,7 @@ No more manually editing `~/.zshrc` — add, edit, delete, tag and organize your
 ### Option A — Build from source
 
 ```bash
-git clone https://github.com/efekurucay/terminal-alias-manager.git
+git clone https://github.com/efekurucay/tam-cli.git
 cd terminal-alias-manager
 open AliasManager.xcodeproj
 # Press ⌘R to build & run
@@ -175,6 +175,6 @@ MIT License — see [LICENSE](LICENSE)
 
 Built with ❤️ using Swift & SwiftUI
 
-[Report Bug](https://github.com/efekurucay/terminal-alias-manager/issues) · [Request Feature](https://github.com/efekurucay/terminal-alias-manager/issues)
+[Report Bug](https://github.com/efekurucay/tam-cli/issues) · [Request Feature](https://github.com/efekurucay/tam-cli/issues)
 
 </div>

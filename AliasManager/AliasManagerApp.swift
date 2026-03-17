@@ -26,13 +26,13 @@ struct AliasManagerApp: App {
             CommandGroup(replacing: .help) {
                 Button("About AliasManager") {
                     NSWorkspace.shared.open(
-                        URL(string: "https://github.com/efekurucay/terminal-alias-manager")!
+                        URL(string: "https://github.com/efekurucay/tam-cli")!
                     )
                 }
                 Divider()
                 Button("View on GitHub") {
                     NSWorkspace.shared.open(
-                        URL(string: "https://github.com/efekurucay/terminal-alias-manager")!
+                        URL(string: "https://github.com/efekurucay/tam-cli")!
                     )
                 }
             }

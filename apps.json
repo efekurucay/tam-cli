@@ -18,16 +18,16 @@
       "subtitle": "Manage your shell aliases visually",
       "description": "A native macOS app to manage your ~/.zshrc terminal aliases with a clean SwiftUI interface.",
       "longDescription": "Terminal Alias Manager lets you visually manage your shell aliases without ever editing ~/.zshrc by hand. Add, edit, delete, enable/disable, search, sort, duplicate, backup, and import/export aliases — all from a native Finder-style interface. Changes are applied instantly with automatic source ~/.zshrc.",
-      "icon": "https://raw.githubusercontent.com/efekurucay/terminal-alias-manager/main/AliasManager/Assets.xcassets/AppIcon.appiconset/512-mac.png",
+      "icon": "https://raw.githubusercontent.com/efekurucay/tam-cli/main/AliasManager/Assets.xcassets/AppIcon.appiconset/512-mac.png",
       "iconEmoji": "⌨️",
       "iconStyle": { "scale": 1.3, "objectFit": "cover", "borderRadius": "22%" },
       "category": ["macos", "developer-tools", "utilities"],
       "platform": "macOS",
       "price": "Free",
-      "github": "https://github.com/efekurucay/terminal-alias-manager",
+      "github": "https://github.com/efekurucay/tam-cli",
       "homepage": "https://efekurucay.com",
       "language": "Swift",
-      "downloadUrl": "https://github.com/efekurucay/terminal-alias-manager/releases/latest",
+      "downloadUrl": "https://github.com/efekurucay/tam-cli/releases/latest",
       "requirements": "macOS 14.0 (Sonoma) or later",
       "features": [
         "Parse & list aliases from ~/.zshrc automatically",
@@ -43,8 +43,8 @@
         "Native SwiftUI with Finder-style NavigationSplitView"
       ],
       "screenshots": [
-        "https://raw.githubusercontent.com/efekurucay/terminal-alias-manager/main/docs/ss.png",
-        "https://raw.githubusercontent.com/efekurucay/terminal-alias-manager/main/docs/ss3.png"
+        "https://raw.githubusercontent.com/efekurucay/tam-cli/main/docs/ss.png",
+        "https://raw.githubusercontent.com/efekurucay/tam-cli/main/docs/ss3.png"
       ]
     }
   ]
